@@ -1,0 +1,8 @@
+arxiv>=2.1
+keybert>=0.8
+spacy>=3.7
+# Modelo de spaCy (instalar aparte): python -m spacy download en_core_web_sm
+sentence-transformers>=3.0
+networkx>=3.2
+pyvis>=0.3.2
+numpy
