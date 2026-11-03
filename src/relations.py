@@ -1,11 +1,13 @@
 """Cálculo de relaciones entre pares de artículos."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import combinations
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+from .embedding import embed_documents
 from .fetcher import Paper
+from .text import normalize_name
 
 
 @dataclass
@@ -16,6 +18,16 @@ class Relation:
     shared_keywords: list[str]
     shared_categories: list[str]
     shared_authors: list[str]
+    # Rellenados por fulltext.py solo para pares dudosos (similitud de abstract cerca de θ).
+    fulltext_similarity: float | None = None
+    evidence: list[dict] = field(default_factory=list)  # pasajes más parecidos {"a", "b", "similarity"}
+    via_fulltext: bool = False  # la arista existe solo gracias al texto completo
+
+
+def similarity_matrix(papers: list[Paper], model: SentenceTransformer) -> np.ndarray:
+    """S = ΦΦᵀ con Φ los embeddings (troceados si hace falta) de título + abstract."""
+    emb = embed_documents([f"{p.title}. {p.abstract}" for p in papers], model)
+    return emb @ emb.T
 
 
 def merge_keywords(papers: list[Paper], model: SentenceTransformer, threshold: float = 0.85) -> dict[str, set[str]]:
@@ -47,18 +59,16 @@ def merge_keywords(papers: list[Paper], model: SentenceTransformer, threshold: f
 
 def compute_relations(
     papers: list[Paper],
-    model: SentenceTransformer,
+    sims: np.ndarray,
     concepts: dict[str, set[str]],
     sim_threshold: float = 0.4,
 ) -> list[Relation]:
     """Devuelve las relaciones relevantes entre cada par de papers.
 
     Un par se considera relacionado si la similitud semántica de sus abstracts
-    supera `sim_threshold` o si comparten keywords o autores.
+    (`sims`, de `similarity_matrix`) supera `sim_threshold` o si comparten
+    keywords o autores.
     """
-    emb = model.encode([f"{p.title}. {p.abstract}" for p in papers], normalize_embeddings=True)
-    sims = np.asarray(emb) @ np.asarray(emb).T
-
     relations = []
     for i, j in combinations(range(len(papers)), 2):
         a, b = papers[i], papers[j]
@@ -68,8 +78,19 @@ def compute_relations(
             similarity=float(sims[i, j]),
             shared_keywords=sorted(concepts[a.id] & concepts[b.id]),
             shared_categories=sorted(set(a.categories) & set(b.categories)),
-            shared_authors=sorted(set(a.authors) & set(b.authors)),
+            shared_authors=_shared_authors(a.authors, b.authors),
         )
         if rel.similarity >= sim_threshold or rel.shared_keywords or rel.shared_authors:
             relations.append(rel)
     return relations
+
+
+def _shared_authors(authors_a: list[str], authors_b: list[str]) -> list[str]:
+    """Autores comunes, comparando nombres normalizados.
+
+    arXiv no unifica la grafía de un mismo autor entre papers: "López-Corona"
+    y "Lopez Corona" son la misma persona. Se devuelve la grafía del primer paper.
+    """
+    keys_a = {normalize_name(n): n for n in authors_a}
+    keys_b = {normalize_name(n) for n in authors_b}
+    return sorted(keys_a[k] for k in keys_a.keys() & keys_b)
