@@ -11,6 +11,7 @@ from .relations import Relation
 
 PALETTE = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#edc948", "#b07aa1", "#ff9da7"]
 KEYWORD_COLOR = "#bab0ac"
+FULLTEXT_COLOR = "#2a8c82"
 
 
 def _paper_tooltip(p: Paper) -> str:
@@ -19,6 +20,7 @@ def _paper_tooltip(p: Paper) -> str:
         p.title,
         f"{', '.join(p.authors[:4])}{' et al.' if len(p.authors) > 4 else ''} · {p.published}",
         f"Categorías: {', '.join(p.categories)}",
+        *([f"Relevancia para el tema: {p.relevance:.2f}"] if p.relevance is not None else []),
         f"Keywords: {', '.join(p.keywords)}",
         "",
         textwrap.fill(abstract, width=80),
@@ -33,6 +35,16 @@ def _relation_tooltip(r: Relation) -> str:
         lines.append(f"Categorías: {', '.join(r.shared_categories)}")
     if r.shared_authors:
         lines.append(f"Autores: {', '.join(r.shared_authors)}")
+    if r.fulltext_similarity is not None:
+        origin = " (arista detectada solo con texto completo)" if r.via_fulltext else ""
+        lines.append(f"Texto completo (Chamfer): {r.fulltext_similarity:.2f}{origin}")
+        for k, ev in enumerate(r.evidence, 1):
+            lines += [
+                "",
+                f"Pasajes más parecidos #{k} (similitud {ev['similarity']:.2f}):",
+                textwrap.fill("A: " + textwrap.shorten(ev["a"], width=240, placeholder="…"), width=80),
+                textwrap.fill("B: " + textwrap.shorten(ev["b"], width=240, placeholder="…"), width=80),
+            ]
     return "\n".join(lines)
 
 
@@ -59,14 +71,17 @@ def build_graph(
         )
 
     for r in relations:
+        # Las aristas rescatadas por el texto completo se dibujan aparte (color propio y
+        # grosor según Chamfer): su similitud de abstract queda, por definición, bajo θ.
+        sim = r.fulltext_similarity if r.via_fulltext else r.similarity
         G.add_edge(
             r.source,
             r.target,
             title=_relation_tooltip(r),
-            weight=1 + 8 * max(r.similarity, 0),  # pyvis.from_nx traduce `weight` a grosor
-            label=f"{r.similarity:.2f}",
-            color="#666666",
-            kind="paper",
+            weight=1 + 8 * max(sim, 0),  # pyvis.from_nx traduce `weight` a grosor
+            label=f"{sim:.2f}" + (" (texto)" if r.via_fulltext else ""),
+            color=FULLTEXT_COLOR if r.via_fulltext else "#666666",
+            kind="fulltext" if r.via_fulltext else "paper",
         )
 
     if show_keywords:

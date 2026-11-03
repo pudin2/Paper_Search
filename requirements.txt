@@ -6,3 +6,6 @@ sentence-transformers>=3.0
 networkx>=3.2
 pyvis>=0.3.2
 numpy
+pypdf>=4.0         # texto completo de PDFs cuando arXiv no tiene versión HTML
+lxml               # parseo del HTML de arXiv
+requests
